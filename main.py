@@ -1,20 +1,21 @@
 '''Train CIFAR10 with PyTorch.'''
-from __future__ import print_function
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
+from torch.optim.lr_scheduler import MultiStepLR
 
 import torchvision
 import torchvision.transforms as transforms
 
 import os
 import argparse
+import csv
+import time
 
 from models import *
-from utils import progress_bar
+from utils import progress_bar, save_log, get_time
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
@@ -51,7 +52,7 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship'
 # Model
 print('==> Building model..')
 # net = VGG('VGG19')
-net = ResNet18()
+# net = ResNet18()
 # net = PreActResNet18()
 # net = GoogLeNet()
 # net = DenseNet121()
@@ -61,6 +62,9 @@ net = ResNet18()
 # net = DPN92()
 # net = ShuffleNetG2()
 # net = SENet18()
+# net = ShuffleNetV2(1)
+# net = EfficientNetB0()
+net = ResNet50()
 net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
@@ -70,13 +74,22 @@ if args.resume:
     # Load checkpoint.
     print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/ckpt.t7')
+    checkpoint = torch.load('./checkpoint/ckpt.pth')
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+scheduler = MultiStepLR(optimizer, [80, 120, 160], gamma=0.1)
+
+log = None
+filewriter = None
+epoch_time = None
+
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
 
 # Training
 def train(epoch):
@@ -100,6 +113,7 @@ def train(epoch):
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+    return get_time(), get_lr(optimizer)
 
 def test(epoch):
     global best_acc
@@ -132,10 +146,21 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/ckpt.t7')
+        torch.save(state, './checkpoint/ckpt.pth')
         best_acc = acc
+    return acc, get_time()
 
+log = open('training_log.csv', 'w')
+filewriter = csv.writer(log, delimiter=',')
+filewriter.writerow(['epoch', 'val_acc', 'lr', 'total_time'])
 
-for epoch in range(start_epoch, start_epoch+200):
-    train(epoch)
-    test(epoch)
+begin_time = time.time()
+
+for epoch in range(start_epoch, start_epoch+350):
+    train_time, lr = train(epoch)
+    acc, test_time = test(epoch)
+    save_log(epoch, acc, train_time + test_time, lr, filewriter)
+    scheduler.step()
+save_log(350, 0, time.time() - begin_time, 0, filewriter)
+
+log.close()

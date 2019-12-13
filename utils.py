@@ -7,6 +7,7 @@ import os
 import sys
 import time
 import math
+import csv
 
 import torch.nn as nn
 import torch.nn.init as init
@@ -90,6 +91,15 @@ def progress_bar(current, total, msg=None):
     else:
         sys.stdout.write('\n')
     sys.stdout.flush()
+
+def save_log(epoch, val_acc, time, lr, filewriter):
+    filewriter.writerow([epoch, val_acc, lr, format_time(time)])
+
+def get_time():
+    cur_time = time.time()
+    tot_time = cur_time - begin_time
+    return tot_time
+
 
 def format_time(seconds):
     days = int(seconds / 3600/24)
